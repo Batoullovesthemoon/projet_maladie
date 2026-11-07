@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs (keep folder, ignore contents)
+logs/*
+!logs/.gitkeep
+
+# Results (keep folder, ignore contents)
+results/*
+!results/.gitkeep
+
+# Raw data — never commit
+data/raw/
+data/*.csv
+
+# OS / editor junk
+.DS_Store
+*.swp
