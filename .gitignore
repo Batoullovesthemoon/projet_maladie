@@ -30,3 +30,4 @@ data/*.csv
 data/processed/
 tmp/*
 !tmp/.gitkeep
+.pytest_cache/

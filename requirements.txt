@@ -18,3 +18,4 @@ setuptools==84.2.1
 threadpoolctl==3.8.0
 tzdata==2026.6
 wheel==0.48.0
+pytest==9.2.0
