@@ -27,3 +27,6 @@ data/*.csv
 # OS / editor junk
 .DS_Store
 *.swp
+data/processed/
+tmp/*
+!tmp/.gitkeep
