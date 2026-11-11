@@ -1,0 +1,12 @@
+# crontab.example - weekly automatic run of the GSE66494 pipeline.
+#
+# Install:  crontab -e   then paste the last line below and save.
+# Check:    crontab -l
+# Fields:   minute hour day-of-month month day-of-week command
+#
+# This line runs every Monday at 03:00. It goes to the project folder
+# (here ~/projet_maladie: change it if your repo is elsewhere), activates the
+# Python venv, runs run.sh, and appends the output to logs/cron.log.
+# run.sh also writes its own timestamped log in logs/ and a dated archive in
+# results/archives/ at every run.
+0 3 * * 1 cd "$HOME/projet_maladie" && . .venv/bin/activate && ./run.sh >> logs/cron.log 2>&1
