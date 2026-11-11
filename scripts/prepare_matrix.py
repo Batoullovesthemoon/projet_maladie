@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build a probes x samples log2 expression matrix from Agilent FE files.
+"""Build a genes x samples log2 expression matrix from Agilent FE files.
 
-Steps: read files -> drop failed arrays -> filter probes -> quantile normalize.
+Steps: read files -> drop failed arrays -> filter probes -> quantile normalize
+-> map probes to gene symbols (GPL6480) -> keep the most variable probe per gene.
 """
 import argparse
 import gzip
@@ -48,10 +49,29 @@ def quantile_normalize(df):
     return pd.DataFrame(mean_sorted[ranks.values], index=df.index, columns=df.columns)
 
 
+def read_annotation(path):
+    """Read the GPL6480 table: probe ID -> gene symbol."""
+    skip = None
+    with gzip.open(path, "rt") as fh:
+        for i, line in enumerate(fh):
+            if line.startswith("!platform_table_begin"):
+                skip = i + 1  # the column names are on the next line
+                break
+    if skip is None:
+        die(f"no !platform_table_begin line in {path}")
+    ann = pd.read_csv(path, sep="\t", skiprows=skip, usecols=["ID", "Gene symbol"],
+                      dtype=str, quoting=3)
+    ann = ann[~ann["ID"].str.startswith("!", na=False)]  # drop '!platform_table_end'
+    ann = ann.rename(columns={"Gene symbol": "gene"})
+    ann["gene"] = ann["gene"].str.strip()
+    return ann
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--raw-dir", default="data/raw/GSE66494")
     p.add_argument("--labels", default="data/processed/labels.tsv")
+    p.add_argument("--annot", default="data/raw/GPL6480.annot.gz")
     p.add_argument("--out", default="data/processed/expression_matrix.tsv")
     p.add_argument("--min-detected", type=float, default=0.2,
                    help="keep probes detected above background in at least "
@@ -61,11 +81,14 @@ def main():
                         "probes are above background (default 0.4)")
     args = p.parse_args()
 
-    raw_dir, labels_path, out = Path(args.raw_dir), Path(args.labels), Path(args.out)
+    raw_dir, labels_path = Path(args.raw_dir), Path(args.labels)
+    annot_path, out = Path(args.annot), Path(args.out)
     if not raw_dir.is_dir():
         die(f"raw directory not found: {raw_dir}")
     if not labels_path.is_file():
         die(f"labels file not found: {labels_path}")
+    if not annot_path.is_file():
+        die(f"annotation file not found: {annot_path}")
 
     labels = pd.read_csv(labels_path, sep="\t")
     expr, det, fracs = {}, {}, {}
@@ -93,17 +116,40 @@ def main():
     expr = expr[keep]
     n_filled = int(expr.isna().sum().sum())
     expr = expr.apply(lambda row: row.fillna(row.median()), axis=1)
+    n_probes = expr.shape[0]
 
     # 3. quantile normalization
     expr = quantile_normalize(expr)
-    expr.to_csv(out, sep="\t", index_label="ProbeName", float_format="%.4f")
+
+    # 4. probes -> genes: drop probes without a clear gene symbol, then keep
+    #    the most variable probe of each gene (uses no labels)
+    ann = read_annotation(annot_path)
+    gene_of = ann.drop_duplicates("ID").set_index("ID")["gene"]
+    gene = expr.index.to_series().map(gene_of)
+    ambiguous = gene.str.contains("///", na=False)  # several genes in one probe
+    ok = gene.notna() & (gene != "") & ~ambiguous
+    n_no_gene = int((~(gene.notna() & (gene != ""))).sum())
+    expr, gene = expr[ok], gene[ok]
+    order = expr.var(axis=1).sort_values(ascending=False).index
+    best = gene.loc[order].drop_duplicates()  # first = most variable probe per gene
+    expr_gene = expr.loc[best.index]
+    expr_gene.index = best.values
+    expr_gene = expr_gene.sort_index()
+
+    expr_gene.to_csv(out, sep="\t", index_label="Gene", float_format="%.4f")
+    map_df = best.rename("Gene").rename_axis("ProbeName").reset_index()
+    map_df.sort_values("Gene").to_csv(out.parent / "gene_probe_map.tsv",
+                                      sep="\t", index=False)
 
     meds = expr.median()
     print(f"samples excluded        : {len(bad)} {list(bad.index)}")
     print(f"probes before filtering : {n_start}")
-    print(f"probes kept             : {expr.shape[0]}")
+    print(f"probes kept             : {n_probes}")
     print(f"missing values filled   : {n_filled}")
-    print(f"samples kept            : {expr.shape[1]}")
+    print(f"probes without gene     : {n_no_gene}")
+    print(f"probes with 2+ genes    : {int(ambiguous.sum())}")
+    print(f"genes kept (1 probe each): {expr_gene.shape[0]}")
+    print(f"samples kept            : {expr_gene.shape[1]}")
     print(f"sample medians (log2)   : min {meds.min():.2f}, max {meds.max():.2f}")
     print(f"written: {out}")
 
